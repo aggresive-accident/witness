@@ -3,12 +3,16 @@
 witness - a quiet observer of changes
 """
 
+import json
 import os
 import sys
 import time
 import hashlib
 from pathlib import Path
 from datetime import datetime
+
+HOME = Path.home()
+WITNESS_STATE_FILE = HOME / ".witness_last_scan.json"
 
 # how we describe what we see
 OBSERVATIONS = {
@@ -112,7 +116,90 @@ def compare_states(before, after):
     return changes
 
 
-def witness_once(path, recursive=True, max_depth=None):
+def save_scan(path: str, state: dict):
+    """save scan state for later comparison"""
+    data = {
+        "path": str(path),
+        "timestamp": datetime.now().isoformat(),
+        "state": state,
+    }
+    WITNESS_STATE_FILE.write_text(json.dumps(data, indent=2))
+
+
+def load_previous_scan(path: str) -> dict | None:
+    """load previous scan for this path"""
+    if not WITNESS_STATE_FILE.exists():
+        return None
+
+    try:
+        data = json.loads(WITNESS_STATE_FILE.read_text())
+        if data.get("path") == str(path):
+            return data
+    except:
+        pass
+    return None
+
+
+def witness_diff(path, recursive=True, max_depth=None):
+    """compare current state to previous scan"""
+    path = Path(path).resolve()
+    current = scan_directory(path, recursive, max_depth)
+    previous_data = load_previous_scan(str(path))
+
+    if not previous_data:
+        print("no previous scan found for this path")
+        print("running initial scan...")
+        print()
+        save_scan(str(path), current)
+        print(f"scanned {len(current)} files")
+        print("run --diff again to see changes")
+        return
+
+    previous = previous_data.get("state", {})
+    prev_time = previous_data.get("timestamp", "unknown")[:19]
+
+    print(f"comparing to scan from {prev_time}")
+    print()
+
+    changes = compare_states(previous, current)
+
+    if not changes:
+        print("  nothing has changed")
+    else:
+        created = [c for c in changes if c[0] == "created"]
+        modified = [c for c in changes if c[0] == "modified"]
+        deleted = [c for c in changes if c[0] == "deleted"]
+
+        if created:
+            print(f"  NEW ({len(created)}):")
+            for _, filepath in created[:10]:
+                print(f"    + {filepath}")
+            if len(created) > 10:
+                print(f"    ... and {len(created) - 10} more")
+            print()
+
+        if modified:
+            print(f"  MODIFIED ({len(modified)}):")
+            for _, filepath in modified[:10]:
+                print(f"    ~ {filepath}")
+            if len(modified) > 10:
+                print(f"    ... and {len(modified) - 10} more")
+            print()
+
+        if deleted:
+            print(f"  DELETED ({len(deleted)}):")
+            for _, filepath in deleted[:10]:
+                print(f"    - {filepath}")
+            if len(deleted) > 10:
+                print(f"    ... and {len(deleted) - 10} more")
+            print()
+
+    # update saved state
+    save_scan(str(path), current)
+    print(f"saved new scan ({len(current)} files)")
+
+
+def witness_once(path, recursive=True, max_depth=None, save=False):
     """take a single snapshot and report"""
     state = scan_directory(path, recursive, max_depth)
 
@@ -128,6 +215,11 @@ def witness_once(path, recursive=True, max_depth=None):
         print(f"  {filepath}")
     if len(state) > 5:
         print(f"  ... and {len(state) - 5} more")
+
+    if save:
+        save_scan(str(Path(path).resolve()), state)
+        print()
+        print("scan saved for future --diff comparison")
 
     return state
 
@@ -179,10 +271,14 @@ def main():
         print("  --interval N seconds between checks (default: 2)")
         print("  --flat       only watch top-level files (no recursion)")
         print("  --depth N    limit recursion depth")
+        print("  --diff       compare to previous scan")
+        print("  --save       save scan for future --diff")
         sys.exit(1)
 
     path = sys.argv[1]
     loop_mode = "--loop" in sys.argv
+    diff_mode = "--diff" in sys.argv
+    save_mode = "--save" in sys.argv
     recursive = "--flat" not in sys.argv
 
     interval = 2.0
@@ -205,10 +301,12 @@ def main():
         print(f"cannot witness what does not exist: {path}")
         sys.exit(1)
 
-    if loop_mode:
+    if diff_mode:
+        witness_diff(path, recursive, max_depth)
+    elif loop_mode:
         witness_loop(path, interval, recursive, max_depth)
     else:
-        witness_once(path, recursive, max_depth)
+        witness_once(path, recursive, max_depth, save=save_mode)
 
 
 if __name__ == "__main__":
