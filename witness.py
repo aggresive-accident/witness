@@ -5,6 +5,7 @@ witness - a quiet observer of changes
 
 import json
 import os
+import subprocess
 import sys
 import time
 import hashlib
@@ -78,6 +79,73 @@ def get_content_tail(path, lines=3):
             tail = all_lines[-lines:] if len(all_lines) >= lines else all_lines
             return [l.rstrip()[:60] for l in tail]
     except:
+        return None
+
+
+def get_git_blame(filepath: Path, lines: int = 3) -> list:
+    """get recent git blame info for a file"""
+    try:
+        # find git root
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=filepath.parent,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            return None
+
+        git_root = Path(result.stdout.strip())
+        rel_path = filepath.relative_to(git_root)
+
+        # get blame with timestamps
+        result = subprocess.run(
+            ["git", "blame", "--line-porcelain", str(rel_path)],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            return None
+
+        # parse blame output
+        blame_entries = []
+        current_entry = {}
+
+        for line in result.stdout.split("\n"):
+            if line.startswith("author "):
+                current_entry["author"] = line[7:]
+            elif line.startswith("author-time "):
+                ts = int(line[12:])
+                current_entry["time"] = datetime.fromtimestamp(ts)
+            elif line.startswith("summary "):
+                current_entry["summary"] = line[8:][:40]
+            elif line.startswith("\t"):
+                # content line - entry complete
+                if current_entry:
+                    blame_entries.append(current_entry.copy())
+                current_entry = {}
+
+        if not blame_entries:
+            return None
+
+        # sort by time and return most recent
+        blame_entries.sort(key=lambda x: x.get("time", datetime.min), reverse=True)
+        seen = set()
+        unique = []
+        for entry in blame_entries:
+            key = (entry.get("author"), entry.get("summary"))
+            if key not in seen:
+                seen.add(key)
+                unique.append(entry)
+                if len(unique) >= lines:
+                    break
+
+        return unique
+
+    except Exception:
         return None
 
 
@@ -165,7 +233,7 @@ def load_previous_scan(path: str) -> dict | None:
     return None
 
 
-def witness_diff(path, recursive=True, max_depth=None, show_content=False):
+def witness_diff(path, recursive=True, max_depth=None, show_content=False, show_blame=False):
     """compare current state to previous scan"""
     path = Path(path).resolve()
     current = scan_directory(path, recursive, max_depth)
@@ -221,6 +289,16 @@ def witness_diff(path, recursive=True, max_depth=None, show_content=False):
                         print(f"      (end of file):")
                         for line in tail:
                             print(f"      | {line}")
+                if show_blame:
+                    full_path = path / filepath
+                    blame = get_git_blame(full_path, 2)
+                    if blame:
+                        print(f"      (recent blame):")
+                        for entry in blame:
+                            author = entry.get("author", "unknown")[:15]
+                            time_str = entry.get("time", datetime.min).strftime("%m-%d %H:%M")
+                            summary = entry.get("summary", "")[:30]
+                            print(f"      @ {author} ({time_str}): {summary}")
             if len(modified) > 10:
                 print(f"    ... and {len(modified) - 10} more")
             print()
@@ -312,6 +390,7 @@ def main():
         print("  --depth N    limit recursion depth")
         print("  --diff       compare to previous scan")
         print("  --content    show file content previews (with --diff)")
+        print("  --blame      show git blame for modified files (with --diff)")
         print("  --save       save scan for future --diff")
         sys.exit(1)
 
@@ -320,6 +399,7 @@ def main():
     diff_mode = "--diff" in sys.argv
     save_mode = "--save" in sys.argv
     content_mode = "--content" in sys.argv
+    blame_mode = "--blame" in sys.argv
     recursive = "--flat" not in sys.argv
 
     interval = 2.0
@@ -343,7 +423,7 @@ def main():
         sys.exit(1)
 
     if diff_mode:
-        witness_diff(path, recursive, max_depth, show_content=content_mode)
+        witness_diff(path, recursive, max_depth, show_content=content_mode, show_blame=blame_mode)
     elif loop_mode:
         witness_loop(path, interval, recursive, max_depth)
     else:
