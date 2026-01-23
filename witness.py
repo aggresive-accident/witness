@@ -52,7 +52,7 @@ def hash_file(path):
         return None
 
 
-def scan_directory(path):
+def scan_directory(path, recursive=True, max_depth=None):
     """capture the current state of a directory"""
     state = {}
     path = Path(path)
@@ -60,12 +60,25 @@ def scan_directory(path):
     if not path.exists():
         return state
 
-    for item in path.rglob('*'):
+    if recursive:
+        items = path.rglob('*')
+    else:
+        items = path.glob('*')
+
+    for item in items:
         if item.is_file():
             rel_path = str(item.relative_to(path))
+
             # skip hidden files and common noise
             if any(part.startswith('.') for part in item.parts):
                 continue
+
+            # check depth if specified
+            if max_depth is not None:
+                depth = len(item.relative_to(path).parts)
+                if depth > max_depth:
+                    continue
+
             state[rel_path] = {
                 'mtime': item.stat().st_mtime,
                 'size': item.stat().st_size,
@@ -99,15 +112,18 @@ def compare_states(before, after):
     return changes
 
 
-def witness_once(path):
+def witness_once(path, recursive=True, max_depth=None):
     """take a single snapshot and report"""
-    state = scan_directory(path)
+    state = scan_directory(path, recursive, max_depth)
 
     if not state:
         print("the directory is empty, or hidden")
         return state
 
-    print(f"i see {len(state)} files")
+    mode = "recursive" if recursive else "flat"
+    if max_depth is not None:
+        mode = f"depth={max_depth}"
+    print(f"i see {len(state)} files ({mode})")
     for filepath in sorted(state.keys())[:5]:
         print(f"  {filepath}")
     if len(state) > 5:
@@ -116,15 +132,19 @@ def witness_once(path):
     return state
 
 
-def witness_loop(path, interval=2.0):
+def witness_loop(path, interval=2.0, recursive=True, max_depth=None):
     """watch continuously, reporting changes"""
     path = Path(path).resolve()
 
+    mode = "recursive" if recursive else "flat"
+    if max_depth is not None:
+        mode = f"depth={max_depth}"
+
     print(f"witnessing: {path}")
-    print(f"interval: {interval}s")
+    print(f"mode: {mode}, interval: {interval}s")
     print()
 
-    state = scan_directory(path)
+    state = scan_directory(path, recursive, max_depth)
     print(f"initial state: {len(state)} files")
     print("waiting...")
     print()
@@ -132,7 +152,7 @@ def witness_loop(path, interval=2.0):
     try:
         while True:
             time.sleep(interval)
-            new_state = scan_directory(path)
+            new_state = scan_directory(path, recursive, max_depth)
             changes = compare_states(state, new_state)
 
             if changes:
@@ -152,15 +172,18 @@ def witness_loop(path, interval=2.0):
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: witness.py <directory> [--loop] [--interval N]")
+        print("usage: witness.py <directory> [options]")
         print()
         print("options:")
         print("  --loop       watch continuously for changes")
         print("  --interval N seconds between checks (default: 2)")
+        print("  --flat       only watch top-level files (no recursion)")
+        print("  --depth N    limit recursion depth")
         sys.exit(1)
 
     path = sys.argv[1]
     loop_mode = "--loop" in sys.argv
+    recursive = "--flat" not in sys.argv
 
     interval = 2.0
     if "--interval" in sys.argv:
@@ -170,14 +193,22 @@ def main():
         except (IndexError, ValueError):
             pass
 
+    max_depth = None
+    if "--depth" in sys.argv:
+        try:
+            idx = sys.argv.index("--depth")
+            max_depth = int(sys.argv[idx + 1])
+        except (IndexError, ValueError):
+            pass
+
     if not Path(path).exists():
         print(f"cannot witness what does not exist: {path}")
         sys.exit(1)
 
     if loop_mode:
-        witness_loop(path, interval)
+        witness_loop(path, interval, recursive, max_depth)
     else:
-        witness_once(path)
+        witness_once(path, recursive, max_depth)
 
 
 if __name__ == "__main__":
