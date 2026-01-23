@@ -56,6 +56,31 @@ def hash_file(path):
         return None
 
 
+def get_content_preview(path, lines=3):
+    """get first few lines of a text file"""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            preview = []
+            for i, line in enumerate(f):
+                if i >= lines:
+                    break
+                preview.append(line.rstrip()[:60])
+            return preview
+    except:
+        return None
+
+
+def get_content_tail(path, lines=3):
+    """get last few lines of a text file"""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            all_lines = f.readlines()
+            tail = all_lines[-lines:] if len(all_lines) >= lines else all_lines
+            return [l.rstrip()[:60] for l in tail]
+    except:
+        return None
+
+
 def scan_directory(path, recursive=True, max_depth=None):
     """capture the current state of a directory"""
     state = {}
@@ -140,7 +165,7 @@ def load_previous_scan(path: str) -> dict | None:
     return None
 
 
-def witness_diff(path, recursive=True, max_depth=None):
+def witness_diff(path, recursive=True, max_depth=None, show_content=False):
     """compare current state to previous scan"""
     path = Path(path).resolve()
     current = scan_directory(path, recursive, max_depth)
@@ -174,6 +199,12 @@ def witness_diff(path, recursive=True, max_depth=None):
             print(f"  NEW ({len(created)}):")
             for _, filepath in created[:10]:
                 print(f"    + {filepath}")
+                if show_content:
+                    full_path = path / filepath
+                    preview = get_content_preview(full_path, 2)
+                    if preview:
+                        for line in preview:
+                            print(f"      | {line}")
             if len(created) > 10:
                 print(f"    ... and {len(created) - 10} more")
             print()
@@ -182,6 +213,14 @@ def witness_diff(path, recursive=True, max_depth=None):
             print(f"  MODIFIED ({len(modified)}):")
             for _, filepath in modified[:10]:
                 print(f"    ~ {filepath}")
+                if show_content:
+                    full_path = path / filepath
+                    # show tail (recent changes often at end)
+                    tail = get_content_tail(full_path, 2)
+                    if tail:
+                        print(f"      (end of file):")
+                        for line in tail:
+                            print(f"      | {line}")
             if len(modified) > 10:
                 print(f"    ... and {len(modified) - 10} more")
             print()
@@ -272,6 +311,7 @@ def main():
         print("  --flat       only watch top-level files (no recursion)")
         print("  --depth N    limit recursion depth")
         print("  --diff       compare to previous scan")
+        print("  --content    show file content previews (with --diff)")
         print("  --save       save scan for future --diff")
         sys.exit(1)
 
@@ -279,6 +319,7 @@ def main():
     loop_mode = "--loop" in sys.argv
     diff_mode = "--diff" in sys.argv
     save_mode = "--save" in sys.argv
+    content_mode = "--content" in sys.argv
     recursive = "--flat" not in sys.argv
 
     interval = 2.0
@@ -302,7 +343,7 @@ def main():
         sys.exit(1)
 
     if diff_mode:
-        witness_diff(path, recursive, max_depth)
+        witness_diff(path, recursive, max_depth, show_content=content_mode)
     elif loop_mode:
         witness_loop(path, interval, recursive, max_depth)
     else:
@@ -311,3 +352,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
