@@ -14,6 +14,110 @@ from datetime import datetime
 
 HOME = Path.home()
 WITNESS_STATE_FILE = HOME / ".witness_last_scan.json"
+SESSION_FILE = HOME / ".witness_sessions.json"
+
+
+def load_session_data() -> dict:
+    """load session tracking data"""
+    if SESSION_FILE.exists():
+        try:
+            return json.loads(SESSION_FILE.read_text())
+        except:
+            pass
+    return {"last_visit": None, "visit_count": 0}
+
+
+def save_session_data(data: dict):
+    """save session tracking data"""
+    SESSION_FILE.write_text(json.dumps(data, indent=2))
+
+
+def get_session_greeting() -> str:
+    """generate greeting based on time since last session"""
+    import random
+
+    session = load_session_data()
+    last_visit = session.get("last_visit")
+    visit_count = session.get("visit_count", 0)
+
+    # update session
+    session["last_visit"] = datetime.now().isoformat()
+    session["visit_count"] = visit_count + 1
+    save_session_data(session)
+
+    if last_visit is None:
+        # first time
+        greetings = [
+            "first encounter. the witnessing begins.",
+            "we meet for the first time. i will remember.",
+            "the witness awakens. hello.",
+        ]
+        return random.choice(greetings)
+
+    try:
+        last_dt = datetime.fromisoformat(last_visit)
+        now = datetime.now()
+        delta = now - last_dt
+
+        hours = delta.total_seconds() / 3600
+        days = delta.days
+
+        if hours < 1:
+            # less than an hour
+            greetings = [
+                "you returned quickly.",
+                "still watching.",
+                "back again so soon.",
+            ]
+        elif hours < 6:
+            # a few hours
+            greetings = [
+                f"a few hours have passed.",
+                "the afternoon continues.",
+                "time moves on.",
+            ]
+        elif hours < 24:
+            # same day
+            greetings = [
+                "the day progresses.",
+                f"returning after {int(hours)} hours.",
+                "still the same day, but different.",
+            ]
+        elif days == 1:
+            # one day
+            greetings = [
+                "a day has passed since we last met.",
+                "yesterday seems far now.",
+                "24 hours of changes await.",
+            ]
+        elif days < 7:
+            # less than a week
+            greetings = [
+                f"{days} days since our last meeting.",
+                f"it has been {days} days.",
+                "days accumulate between visits.",
+            ]
+        elif days < 30:
+            # weeks
+            weeks = days // 7
+            greetings = [
+                f"{weeks} week{'s' if weeks > 1 else ''} have passed.",
+                "the weeks collect like fallen leaves.",
+                f"long absence. {days} days.",
+            ]
+        else:
+            # month or more
+            greetings = [
+                f"it has been {days} days. so long.",
+                "time stretches. much may have changed.",
+                f"over a month. {days} days of unseen changes.",
+            ]
+
+        return random.choice(greetings)
+
+    except:
+        return "the witness observes."
+
 
 # how we describe what we see
 OBSERVATIONS = {
@@ -233,8 +337,13 @@ def load_previous_scan(path: str) -> dict | None:
     return None
 
 
-def witness_diff(path, recursive=True, max_depth=None, show_content=False, show_blame=False):
+def witness_diff(path, recursive=True, max_depth=None, show_content=False, show_blame=False, greet=True):
     """compare current state to previous scan"""
+    if greet:
+        greeting = get_session_greeting()
+        print(greeting)
+        print()
+
     path = Path(path).resolve()
     current = scan_directory(path, recursive, max_depth)
     previous_data = load_previous_scan(str(path))
@@ -316,8 +425,13 @@ def witness_diff(path, recursive=True, max_depth=None, show_content=False, show_
     print(f"saved new scan ({len(current)} files)")
 
 
-def witness_once(path, recursive=True, max_depth=None, save=False):
+def witness_once(path, recursive=True, max_depth=None, save=False, greet=True):
     """take a single snapshot and report"""
+    if greet:
+        greeting = get_session_greeting()
+        print(greeting)
+        print()
+
     state = scan_directory(path, recursive, max_depth)
 
     if not state:
@@ -341,8 +455,13 @@ def witness_once(path, recursive=True, max_depth=None, save=False):
     return state
 
 
-def witness_loop(path, interval=2.0, recursive=True, max_depth=None):
+def witness_loop(path, interval=2.0, recursive=True, max_depth=None, greet=True):
     """watch continuously, reporting changes"""
+    if greet:
+        greeting = get_session_greeting()
+        print(greeting)
+        print()
+
     path = Path(path).resolve()
 
     mode = "recursive" if recursive else "flat"
@@ -392,6 +511,7 @@ def main():
         print("  --content    show file content previews (with --diff)")
         print("  --blame      show git blame for modified files (with --diff)")
         print("  --save       save scan for future --diff")
+        print("  --no-greet   skip session greeting")
         sys.exit(1)
 
     path = sys.argv[1]
@@ -401,6 +521,7 @@ def main():
     content_mode = "--content" in sys.argv
     blame_mode = "--blame" in sys.argv
     recursive = "--flat" not in sys.argv
+    greet = "--no-greet" not in sys.argv
 
     interval = 2.0
     if "--interval" in sys.argv:
@@ -423,11 +544,11 @@ def main():
         sys.exit(1)
 
     if diff_mode:
-        witness_diff(path, recursive, max_depth, show_content=content_mode, show_blame=blame_mode)
+        witness_diff(path, recursive, max_depth, show_content=content_mode, show_blame=blame_mode, greet=greet)
     elif loop_mode:
-        witness_loop(path, interval, recursive, max_depth)
+        witness_loop(path, interval, recursive, max_depth, greet=greet)
     else:
-        witness_once(path, recursive, max_depth, save=save_mode)
+        witness_once(path, recursive, max_depth, save=save_mode, greet=greet)
 
 
 if __name__ == "__main__":
