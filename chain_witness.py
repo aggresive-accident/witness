@@ -13,6 +13,14 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
+# Singleton protection
+sys.path.insert(0, str(Path.home() / "workspace" / "organism"))
+try:
+    from core.singleton import Singleton
+    HAS_SINGLETON = True
+except ImportError:
+    HAS_SINGLETON = False
+
 HOME = Path.home()
 STATE_FILE = HOME / ".infinite-chain" / "state.json"
 LOG_FILE = HOME / ".infinite-chain" / ".chain-witness.log"
@@ -94,9 +102,19 @@ def watch_once():
 
 def watch_loop(interval: float = 5.0):
     """continuously watch for chain changes"""
+    # Singleton protection
+    guard = None
+    if HAS_SINGLETON:
+        guard = Singleton("chain-witness")
+        if not guard.acquire():
+            print("chain-witness: already running")
+            return
+
     print("chain_witness begins watching")
     print(f"target: {STATE_FILE}")
     print(f"interval: {interval}s")
+    if guard:
+        print("singleton: protected")
     print()
 
     log_observation("chain_witness begins")
@@ -135,6 +153,9 @@ def watch_loop(interval: float = 5.0):
         log_observation("chain_witness stops")
         print()
         print("observation ended")
+    finally:
+        if guard:
+            guard.release()
 
 
 def show_history():

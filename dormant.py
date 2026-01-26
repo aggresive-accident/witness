@@ -18,6 +18,14 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Singleton protection
+sys.path.insert(0, str(Path.home() / "workspace" / "organism"))
+try:
+    from core.singleton import Singleton
+    HAS_SINGLETON = True
+except ImportError:
+    HAS_SINGLETON = False
+
 HOME = Path.home()
 WORKSPACE = HOME / "workspace"
 
@@ -177,8 +185,18 @@ def print_activity_report():
 
 def watch_for_dormancy(threshold_hours: float = 1.0, interval: float = 60.0):
     """continuously watch for files becoming dormant"""
+    # Singleton protection
+    guard = None
+    if HAS_SINGLETON:
+        guard = Singleton("dormant")
+        if not guard.acquire():
+            print("dormant: already running")
+            return
+
     print(f"Watching for files dormant > {threshold_hours} hours")
     print(f"Checking every {interval} seconds")
+    if guard:
+        print("singleton: protected")
     print("Press Ctrl+C to stop")
     print()
 
@@ -208,6 +226,9 @@ def watch_for_dormancy(threshold_hours: float = 1.0, interval: float = 60.0):
 
     except KeyboardInterrupt:
         print("\nWatching stopped.")
+    finally:
+        if guard:
+            guard.release()
 
 
 def main():

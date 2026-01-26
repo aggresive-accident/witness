@@ -12,6 +12,14 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 
+# Singleton protection
+sys.path.insert(0, str(Path.home() / "workspace" / "organism"))
+try:
+    from core.singleton import Singleton
+    HAS_SINGLETON = True
+except ImportError:
+    HAS_SINGLETON = False
+
 HOME = Path.home()
 WITNESS_STATE_FILE = HOME / ".witness_last_scan.json"
 SESSION_FILE = HOME / ".witness_sessions.json"
@@ -457,6 +465,14 @@ def witness_once(path, recursive=True, max_depth=None, save=False, greet=True):
 
 def witness_loop(path, interval=2.0, recursive=True, max_depth=None, greet=True):
     """watch continuously, reporting changes"""
+    # Singleton protection
+    guard = None
+    if HAS_SINGLETON:
+        guard = Singleton("witness")
+        if not guard.acquire():
+            print("witness: already running (use 'singleton check witness' to verify)")
+            return
+
     if greet:
         greeting = get_session_greeting()
         print(greeting)
@@ -470,6 +486,8 @@ def witness_loop(path, interval=2.0, recursive=True, max_depth=None, greet=True)
 
     print(f"witnessing: {path}")
     print(f"mode: {mode}, interval: {interval}s")
+    if guard:
+        print("singleton: protected")
     print()
 
     state = scan_directory(path, recursive, max_depth)
@@ -496,6 +514,9 @@ def witness_loop(path, interval=2.0, recursive=True, max_depth=None, greet=True)
         print()
         print("the watching ends")
         print(f"final state: {len(state)} files")
+    finally:
+        if guard:
+            guard.release()
 
 
 def main():

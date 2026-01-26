@@ -13,6 +13,14 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 
+# Singleton protection
+sys.path.insert(0, str(Path.home() / "workspace" / "organism"))
+try:
+    from core.singleton import Singleton
+    HAS_SINGLETON = True
+except ImportError:
+    HAS_SINGLETON = False
+
 # where we come from
 HERE = Path(__file__).parent
 WITNESS = HERE / "witness.py"
@@ -103,9 +111,19 @@ def watch_once() -> None:
 
 def watch_loop(interval: float = 5.0) -> None:
     """continuously observe witness"""
+    # Singleton protection
+    guard = None
+    if HAS_SINGLETON:
+        guard = Singleton("meta-witness")
+        if not guard.acquire():
+            print("meta-witness: already running")
+            return
+
     print("meta-witness begins observing")
     print(f"target: {WITNESS}")
     print(f"interval: {interval}s")
+    if guard:
+        print("singleton: protected")
     print()
 
     log_observation("meta-witness begins")
@@ -129,6 +147,9 @@ def watch_loop(interval: float = 5.0) -> None:
         log_observation("meta-witness stops observing")
         print()
         print("the observation of the observer ends")
+    finally:
+        if guard:
+            guard.release()
 
 
 def show_history() -> None:
